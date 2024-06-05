@@ -17,9 +17,9 @@ default_args = {
 }
 
 endpoint_url = 'http://minio:9000'
-aws_access_key_id = 'dataops'
-aws_secret_access_key = 'Ankara06'
-bucket_name = 'dataops'
+aws_access_key_id = 'your_acces_key_id'
+aws_secret_access_key = 'your_secret_acces_key'
+bucket_name = 'your_bucket_name'
 
 def download_csvfile(hour, **kwargs):
     url = f'http://172.21.0.5:80/data/hour_{hour}_supermarket_sales.csv'
