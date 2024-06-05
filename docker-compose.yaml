@@ -1,0 +1,140 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.7.1}
+  env_file: ./airflow/.env
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/plugins:/opt/airflow/plugins
+    - /var/run/docker.sock:/var/run/docker.sock
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  # Postgres
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    networks:
+      - airflow_spark_minio
+    env_file: ./postgresql/.env
+    ports:
+      - 5433:5432
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Airflow Webserver
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    container_name: airflow-webserver
+    networks:
+      - airflow_spark_minio
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    container_name: airflow-scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    networks:
+      - airflow_spark_minio
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow Init
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    container_name: airflow-init
+    networks:
+      - airflow_spark_minio
+    command: 
+      # airflow-init commands go here
+
+  # Minio
+  minio:
+    restart: always
+    container_name: minio
+    image: minio/minio:RELEASE.2023-06-02T23-17-26Z
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    env_file:
+      - ./minio/.env
+    command: server /data --console-address ':9001' --address ':9000'
+    volumes:
+      - minio:/data
+    networks:
+      - airflow_spark_minio
+
+  # Spark Client
+  spark_client:
+    container_name: spark_client
+    image: veribilimiokulu/pyspark-3.4.1_python-3.8:1.0
+    ports:
+      - 8888:8888
+      - 4040:4040
+    networks:
+      - airflow_spark_minio
+    volumes:
+      - spark:/dataops
+    command: sleep infinity
+
+  # NGINX
+  nginx:
+    container_name: nginx
+    image: nginx:1.23
+    volumes:
+      - nginx:/usr/share/nginx/html:rw
+    ports:
+      - "5000:80"
+    environment:
+      - BASIC_AUTH_USERNAME=dataops
+      - BASIC_AUTH_PASSWORD=Ankara06
+      - PROXY_PASS=http://data/
+    networks:
+      - airflow_spark_minio
+
+volumes:
+  postgres-db-volume:
+  airflow:
+  minio:
+  spark:
+  nginx:
+
+networks:
+  airflow_spark_minio:
+    driver: bridge
